@@ -1,0 +1,20 @@
+{
+  "name": "LinuxFlow",
+  "action": "aws:runCommand",
+  "isEnd": true,
+  "inputs": {
+    "DocumentName": "AWS-RunShellScript",
+    "InstanceIds": [
+      "{{ InstanceId }}"
+    ],
+    "Parameters": {
+      "commands": [
+        "mkdir -p /tmp/datadog",
+        "cd /tmp/datadog",
+        "aws s3 cp {{ runtimeArtifactsS3Path }}/install_and_configure_linux.sh ./install_and_configure_linux.sh",
+        "chmod +x ./install_and_configure_linux.sh",
+        "./install_and_configure_linux.sh {{ ConfigurationTask }} {{ agentConfigParameterName }} {{ runtimeArtifactsS3Path }}"
+      ]
+    }
+  }
+}
