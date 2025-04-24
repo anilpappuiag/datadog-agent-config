@@ -1,20 +1,136 @@
 {
-  "name": "LinuxFlow",
-  "action": "aws:runCommand",
-  "isEnd": true,
-  "inputs": {
-    "DocumentName": "AWS-RunShellScript",
-    "InstanceIds": [
-      "{{ InstanceId }}"
-    ],
-    "Parameters": {
-      "commands": [
-        "mkdir -p /tmp/datadog",
-        "cd /tmp/datadog",
-        "aws s3 cp {{ runtimeArtifactsS3Path }}/install_and_configure_linux.sh ./install_and_configure_linux.sh",
-        "chmod +x ./install_and_configure_linux.sh",
-        "./install_and_configure_linux.sh {{ ConfigurationTask }} {{ agentConfigParameterName }} {{ runtimeArtifactsS3Path }}"
-      ]
+  "schemaVersion": "0.3",
+  "description": "Installs and configures the Datadog Agent using install scripts from S3 and Parameter Store configuration. Supports both Linux and Windows.",
+  "parameters": {
+    "AutomationAssumeRole": {
+      "type": "String",
+      "description": "(Required) The IAM role assumed by this automation."
+    },
+    "InstanceId": {
+      "type": "String",
+      "description": "(Required) The instance ID where this automation will run."
+    },
+    "ConfigurationTask": {
+      "type": "String",
+      "description": "Install, update, or uninstall the Datadog Agent.",
+      "allowedValues": [
+        "install",
+        "update",
+        "uninstall"
+      ],
+      "default": "install"
+    },
+    "agentConfigParameterName": {
+      "type": "String",
+      "description": "SSM Parameter Store name that holds agent-config.yaml content"
+    },
+    "runtimeArtifactsS3Path": {
+      "type": "String",
+      "default": "s3://ba-o11y-portal-datadog-147997164796-eu-west-1/datadog-ec2-onboarding-kit",
+      "description": "S3 folder containing install scripts and artifacts"
     }
-  }
+  },
+  "assumeRole": "{{ AutomationAssumeRole }}",
+  "mainSteps": [
+    {
+      "name": "GetPlatform",
+      "action": "aws:executeAwsApi",
+      "nextStep": "BranchPlatform",
+      "isEnd": false,
+      "inputs": {
+        "Service": "ssm",
+        "Api": "DescribeInstanceInformation",
+        "InstanceInformationFilterList": [
+          {
+            "key": "InstanceIds",
+            "valueSet": [
+              "{{ InstanceId }}"
+            ]
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "Name": "PlatformType",
+          "Selector": "$.InstanceInformationList[0].PlatformType",
+          "Type": "String"
+        }
+      ]
+    },
+    {
+      "name": "BranchPlatform",
+      "action": "aws:branch",
+      "inputs": {
+        "Choices": [
+          {
+            "NextStep": "LinuxFlow",
+            "Variable": "{{ GetPlatform.PlatformType }}",
+            "StringEquals": "Linux"
+          },
+          {
+            "NextStep": "WindowsFlow",
+            "Variable": "{{ GetPlatform.PlatformType }}",
+            "StringEquals": "Windows"
+          }
+        ],
+        "Default": "HandleUnsupportedPlatform"
+      }
+    },
+    {
+      "name": "LinuxFlow",
+      "action": "aws:runCommand",
+      "isEnd": true,
+      "inputs": {
+        "DocumentName": "AWS-RunShellScript",
+        "InstanceIds": [
+          "{{ InstanceId }}"
+        ],
+        "Parameters": {
+          "commands": [
+            "mkdir -p /tmp/datadog",
+            "cd /tmp/datadog",
+            "aws s3 cp {{ runtimeArtifactsS3Path }}/install_and_configure_linux.sh install.sh",
+            "chmod +x install.sh",
+            "./install.sh '{{ ConfigurationTask }}' '{{ agentConfigParameterName }}' '{{ runtimeArtifactsS3Path }}'"
+          ]
+        }
+      }
+    },
+    {
+      "name": "WindowsFlow",
+      "action": "aws:runCommand",
+      "isEnd": true,
+      "inputs": {
+        "DocumentName": "AWS-RunPowerShellScript",
+        "InstanceIds": [
+          "{{ InstanceId }}"
+        ],
+        "Parameters": {
+          "commands": [
+            "New-Item -ItemType Directory -Path C:\\Temp\\datadog -Force",
+            "Set-Location C:\\Temp\\datadog",
+            "aws s3 cp {{ runtimeArtifactsS3Path }}/install_and_configure_windows.ps1 install.ps1",
+            "powershell.exe -ExecutionPolicy Bypass -File install.ps1 -ConfigTask '{{ ConfigurationTask }}' -AgentConfigParam '{{ agentConfigParameterName }}' -S3Path '{{ runtimeArtifactsS3Path }}'"
+          ]
+        }
+      }
+    },
+    {
+      "name": "HandleUnsupportedPlatform",
+      "action": "aws:runCommand",
+      "isEnd": true,
+      "inputs": {
+        "DocumentName": "AWS-RunShellScript",
+        "InstanceIds": [
+          "{{ InstanceId }}"
+        ],
+        "Parameters": {
+          "commands": [
+            "echo 'Unsupported platform — exiting.'",
+            "exit 1"
+          ]
+        }
+      }
+    }
+  ]
 }
